@@ -1,0 +1,6 @@
+node_modules/
+uploads/
+current_status.json
+playlist_order.json
+.pm2/
+*.log
