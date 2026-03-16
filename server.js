@@ -77,18 +77,22 @@ app.get('/', (req, res) => {
 });
 
 app.get('/api/sync', (req, res) => {
-    if (!currentStatus.isPlaying || !currentStatus.songName) return res.json({ isPlaying: false, loop: isLoopEnabled });
-    const elapsed = (Date.now() - (currentStatus.startTime || Date.now())) / 1000;
-    res.json({ isPlaying: true, songName: currentStatus.songName, elapsed: elapsed, loop: isLoopEnabled });
+    const elapsed = currentStatus.isPlaying && currentStatus.startTime ? (Date.now() - currentStatus.startTime) / 1000 : 0;
+    res.json({ 
+        isPlaying: currentStatus.isPlaying, 
+        songName: currentStatus.songName, 
+        elapsed: elapsed, 
+        loop: isLoopEnabled 
+    });
 });
 
 app.post('/api/sync', requireAuth, (req, res) => {
     const { songName, isPlaying } = req.body;
-    currentStatus.songName = songName || currentStatus.songName;
-    currentStatus.isPlaying = isPlaying;
-    currentStatus.startTime = isPlaying ? Date.now() : null;
+    if (songName !== undefined) currentStatus.songName = songName;
+    if (isPlaying !== undefined) currentStatus.isPlaying = isPlaying;
+    currentStatus.startTime = currentStatus.isPlaying ? Date.now() : null;
     saveStatus();
-    res.json({ message: 'Status updated' });
+    res.json({ message: 'Status updated', status: currentStatus });
 });
 
 const upload = multer({ 
@@ -150,7 +154,7 @@ const logoUpload = multer({
             cb(null, 'logo.png');
         }
     }),
-    limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit for logo
+    limits: { fileSize: 5 * 1024 * 1024 }
 });
 
 app.post('/api/upload-logo', requireAuth, logoUpload.single('logo'), (req, res) => {
@@ -214,17 +218,38 @@ app.delete('/api/files/:name', requireAuth, (req, res) => {
 });
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-const server = app.listen(PORT, '0.0.0.0', () => console.log(`Production Radio (Domain Proxy) running on ${PORT}`));
+
+const server = app.listen(PORT, '0.0.0.0', () => console.log(`Production Radio running on ${PORT}`));
+
 const WebSocket = require('ws');
 const wss = new WebSocket.Server({ server });
 let listeners = new Set();
+
 wss.on('connection', (ws) => {
     ws.on('message', (msg) => {
-        if (typeof msg === 'string') {
-            try { if (JSON.parse(msg).type === 'listener') listeners.add(ws); } catch(e) {}
+        const isBinary = Buffer.isBuffer(msg) || msg instanceof ArrayBuffer || Array.isArray(msg);
+        if (!isBinary) {
+            try {
+                const data = JSON.parse(msg.toString());
+                if (data.type === 'listener') {
+                    listeners.add(ws);
+                }
+                broadcastToListeners(msg, ws);
+            } catch (e) {
+                if (msg.length > 50) broadcastToListeners(msg, ws);
+            }
         } else {
-            for (const l of listeners) if (l.readyState === WebSocket.OPEN) l.send(msg);
+            broadcastToListeners(msg, ws);
         }
     });
     ws.on('close', () => listeners.delete(ws));
+    ws.on('error', (err) => listeners.delete(ws));
 });
+
+function broadcastToListeners(data, sender) {
+    for (const client of listeners) {
+        if (client !== sender && client.readyState === WebSocket.OPEN) {
+            client.send(data);
+        }
+    }
+}

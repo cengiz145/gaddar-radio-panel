@@ -4,12 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Gaddar Radyo | Kontrol Paneli</title>
+    <meta name="mobile-web-app-capable" content="no">
+    <meta name="apple-mobile-web-app-capable" content="no">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div id="app" class="app-container">
+        
         <!-- LOGIN VIEW -->
         <div id="login-view" class="view-layer">
             <div class="glass-panel login-glass">
@@ -20,35 +23,44 @@
                     <h1>GADDAR RADYO</h1>
                     <p class="subtitle">Yayın Yönetim Paneli</p>
                 </div>
+                
                 <form id="login-form" class="modern-form">
                     <div class="input-group">
                         <div class="input-icon"><i class="fas fa-user-circle"></i></div>
                         <input type="text" id="username" placeholder="Kullanıcı Adı" required autocomplete="username">
                     </div>
+                    
                     <div class="input-group">
                         <div class="input-icon"><i class="fas fa-lock"></i></div>
                         <input type="password" id="password" placeholder="Şifre" required autocomplete="current-password">
                     </div>
+                    
                     <button type="submit" id="login-btn" class="btn-primary glow-eff">
                         <span>GİRİŞ YAP</span>
                         <i class="fas fa-arrow-right"></i>
                     </button>
+                    
                     <div id="login-error" class="error-msg hidden">
                         <i class="fas fa-exclamation-triangle"></i> Bilgiler hatalı, tekrar deneyin.
                     </div>
                 </form>
             </div>
+            
+            <!-- Decorative Blobs -->
             <div class="blob blob1"></div>
             <div class="blob blob2"></div>
             <div class="blob blob3"></div>
         </div>
+
         <!-- DASHBOARD VIEW -->
         <div id="main-view" class="view-layer hidden">
+            
             <aside class="sidebar glass-panel">
                 <div class="brand">
                     <i class="fas fa-waveform"></i>
                     <span>GADDAR RADYO</span>
                 </div>
+                
                 <nav class="nav-menu">
                     <button class="nav-item active" data-tab="playlist">
                         <i class="fas fa-list-ul"></i>
@@ -66,6 +78,7 @@
                         <div class="active-indicator"></div>
                     </button>
                 </nav>
+                
                 <div class="bottom-nav">
                     <button id="logout-btn" class="nav-item danger-item">
                         <i class="fas fa-sign-out-alt"></i>
@@ -73,6 +86,7 @@
                     </button>
                 </div>
             </aside>
+
             <main class="content-area">
                 <header class="topbar glass-panel">
                     <div class="status-badge" id="live-badge">
@@ -80,23 +94,34 @@
                         <span class="status-text hidden">CANLI</span>
                         <span class="status-text-offline">ÇEVRİMDIŞI</span>
                     </div>
+                    
                     <div class="now-playing-info">
                         <h2 id="current-song-title" class="marquee">Yayın Bekleniyor</h2>
                         <p id="current-song-artist">Gaddar FM</p>
                     </div>
+
                     <div class="header-controls">
-                        <button id="main-play-btn" class="btn-circle play-pulse">
+                        <button id="main-play-btn" class="btn-circle play-pulse" title="Oynat/Duraklat">
                             <i class="fas fa-play"></i>
                         </button>
-                        <button id="mic-trigger" class="btn-circle btn-hollow" title="Mikrofon (Shift+Z)">
-                            <i class="fas fa-microphone"></i>
+                        <button id="loop-btn" class="btn-circle btn-hollow" title="Döngü (Kapat)">
+                            <i class="fas fa-redo"></i>
                         </button>
+                        <div class="mic-group">
+                            <button id="mic-trigger" class="btn-circle btn-hollow" title="Mikrofon (Shift+Z)">
+                                <i class="fas fa-microphone"></i>
+                            </button>
+                            <div id="mic-meter" class="mic-meter hidden">
+                                <div class="meter-bar"></div>
+                            </div>
+                        </div>
                         <div class="volume-control">
                             <i class="fas fa-volume-up"></i>
                             <input type="range" id="vol-control" min="0" max="1" step="0.01" value="0.5">
                         </div>
                     </div>
                 </header>
+
                 <div class="tab-content glass-panel" id="playlist-tab">
                     <div class="tab-header">
                         <div>
@@ -109,11 +134,15 @@
                             </button>
                         </div>
                     </div>
-                    <div id="playlist-items" class="scrollable-list"></div>
+                    <div id="playlist-items" class="scrollable-list">
+                        <!-- Items injected here -->
+                    </div>
                 </div>
+
                 <div class="tab-content glass-panel hidden" id="upload-tab">
                     <h2>Yükleme Merkezi</h2>
                     <p class="text-sm pb-4">Yeni MP3 veya WAV dosyalarını sisteme aktarın.</p>
+                    
                     <div id="upload-zone" class="upload-dropzone">
                         <div class="upload-icon">
                             <i class="fas fa-cloud-upload-alt"></i>
@@ -122,6 +151,7 @@
                         <p>veya seçmek için tıklayın (Maks: 100MB)</p>
                         <input type="file" id="audio-input" multiple accept="audio/*" class="hidden">
                     </div>
+                    
                     <div class="system-settings mt-6">
                         <h3>Logo Güncelleme</h3>
                         <div class="logo-upload-area">
@@ -136,9 +166,11 @@
                         </div>
                     </div>
                 </div>
+
                 <div class="tab-content glass-panel hidden" id="embed-tab">
                     <h2>Site Entegrasyonu</h2>
                     <p class="text-sm pb-4">Radyoyu kendi web sitenize eklemek için aşağıdaki kodu kopyalayın.</p>
+                    
                     <div class="code-box">
                         <div class="code-header">
                             <span>HTML IFRAME</span>
@@ -147,9 +179,12 @@
                         <textarea id="embed-text" readonly><iframe src="https://gaddarbilgi.com.tr/radyo/" width="100%" height="600" frameborder="0"></iframe></textarea>
                     </div>
                 </div>
+
             </main>
         </div>
     </div>
+
+    <!-- Hidden audio element for local monitoring -->
     <audio id="radyo-audio"></audio>
     <script src="script.js"></script>
 </body>

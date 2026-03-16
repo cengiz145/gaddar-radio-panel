@@ -1,0 +1,344 @@
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gaddar Radyo Player</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-glow: rgba(99, 102, 241, 0.4);
+            --bg: #0f172a;
+            --text: #ffffff;
+            --muted: #94a3b8;
+        }
+        body {
+            margin: 0;
+            padding: 10px;
+            font-family: 'Outfit', sans-serif;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+        .player-container {
+            width: 100%;
+            max-width: 500px;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 24px;
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            gap: 15px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+            box-sizing: border-box;
+            position: relative;
+            transition: all 0.5s ease;
+        }
+
+        /* --- THEMES --- */
+        .theme-modern {
+            height: 110px;
+            border: 2px solid var(--primary);
+            box-shadow: 0 0 30px var(--primary-glow);
+        }
+        .theme-compact {
+            height: 80px;
+            border-radius: 12px;
+            padding: 10px 15px;
+            background: rgba(0, 0, 0, 0.8);
+        }
+        .theme-classic { overflow: hidden;
+            flex-direction: column;
+            height: auto;
+            max-width: 300px;
+            padding: 25px;
+            text-align: center;
+            border-radius: 30px;
+        }
+
+        .logo-section {
+            position: relative;
+            width: 70px;
+            height: 70px;
+            flex-shrink: 0;
+        }
+        .theme-compact .logo-section { width: 45px; height: 45px; }
+        .theme-classic .logo-section { width: 100px; height: 100px; margin-bottom: 10px; }
+
+        .logo-section img {
+            width: 100%;
+            height: 100%;
+            border-radius: 15px;
+            border: 2px solid var(--primary);
+            object-fit: cover;
+        }
+
+        .live-badge {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            background: #ef4444;
+            color: white;
+            font-size: 8px;
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-weight: 800;
+            animation: pulse-red 2s infinite;
+        }
+
+        .info-section {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .info-section h2 {
+            font-size: 14px;
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: var(--text);
+        }
+        .theme-classic .info-section h2 { white-space: normal; }
+        .info-section p {
+            font-size: 10px;
+            color: var(--muted);
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Volume Bar */
+        .volume-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100px;
+            margin-top: 4px;
+        }
+        .theme-classic .volume-container { margin: 10px auto 0 auto; }
+        .volume-container i { font-size: 12px; color: var(--muted); }
+        .volume-slider {
+            flex: 1;
+            height: 4px;
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
+        .control-section {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .play-button {
+            width: 48px;
+            height: 48px;
+            background: var(--primary);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 5px 15px var(--primary-glow);
+            flex-shrink: 0;
+        }
+        .play-button:hover { transform: scale(1.1); }
+        .theme-classic .play-button { width: 55px; height: 55px; margin-top: 5px; }
+
+        @keyframes pulse-red {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        @media (max-width: 350px) {
+            .volume-container { display: none; }
+        }
+    
+        @media (max-width: 380px) {
+            .player-container { padding: 10px; gap: 10px; }
+            .logo-section { width: 50px; height: 50px; }
+            .info-section h2 { font-size: 11px; }
+            .play-button { width: 40px; height: 40px; font-size: 14px; }
+            .control-section { gap: 8px; }
+        }
+        
+    
+        @media (max-width: 330px) {
+            .player-container { padding: 8px; gap: 8px; }
+            .logo-section { width: 40px; height: 40px; }
+            .info-section h2 { font-size: 10px; line-height: 1.1; }
+            .play-button { width: 36px; height: 36px; font-size: 12px; }
+        }
+    
+    </style>
+</head>
+<body>
+    <div class="player-container" id="player">
+        <div class="logo-section">
+            <span class="live-badge">CANLI</span>
+            <img src="logo.png" onerror="this.src='https://ui-avatars.com/api/?name=GB&background=6366f1&color=fff'">
+        </div>
+        <div class="info-section">
+            <h2 id="song-title">Yayın Bekleniyor...</h2>
+            <p>GADDAR RADYO</p>
+            <div class="volume-container">
+                <i class="fas fa-volume-down"></i>
+                <input type="range" class="volume-slider" id="volume-slider" min="0" max="1" step="0.01" value="0.8">
+            </div>
+        </div>
+        <div class="control-section">
+            <button id="play-btn" class="play-button">
+                <i class="fas fa-play"></i>
+            </button>
+        </div>
+    </div>
+
+    <audio id="audio-stream" src="stream"></audio>
+
+    <script>
+        const audio = document.getElementById('audio-stream');
+        const playBtn = document.getElementById('play-btn');
+        const title = document.getElementById('song-title');
+        const player = document.getElementById('player');
+        const volumeSlider = document.getElementById('volume-slider');
+
+        // Whole player touch/click to play (except slider)
+        player.addEventListener('click', (e) => {
+            if (e.target.closest('#volume-slider')) return;
+            if (e.target.closest('#play-btn')) return;
+            playBtn.click();
+        });
+    
+
+        let isLive = false;
+        let lastKnownSong = "";
+
+        // URL Params for Theme
+        const urlParams = new URLSearchParams(window.location.search);
+        const theme = urlParams.get('theme') || 'modern';
+        player.classList.add('theme-' + theme);
+
+        async function syncWithServer(forceJump = false) {
+            try {
+                const res = await fetch('api/sync');
+                const data = await res.json();
+                
+                if (data.isPlaying) {
+                    title.innerText = data.songName.replace(/\.[^/.]+$/, "");
+                    isLive = true;
+                    
+                    const currentSrc = `uploads/${encodeURIComponent(data.songName)}`;
+                    if (lastKnownSong !== data.songName) {
+                        audio.src = currentSrc;
+                        lastKnownSong = data.songName;
+                        if (!audio.paused || forceJump) audio.load();
+                    }
+                    
+                    // Force jump is used when user clicks "Play" to ensure they start at the LIVE point
+                    if (forceJump || (!audio.paused && Math.abs(audio.currentTime - data.elapsed) > 2)) {
+                        audio.currentTime = data.elapsed;
+                        if (audio.paused && forceJump) audio.play();
+                    }
+                } else {
+                    title.innerText = "Yayın Bekleniyor...";
+                    isLive = false;
+                    audio.pause();
+                }
+            } catch (e) {
+                console.error('Sync Error:', e);
+            }
+        }
+
+        // Periodic sync
+        setInterval(() => syncWithServer(false), 5000);
+        syncWithServer(false);
+
+        // Play Button Click
+        playBtn.onclick = async () => {
+            if (audio.paused) {
+                // When starting, ALWAYS force jump to current server time
+                await syncWithServer(true);
+                playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+            } else {
+                audio.pause();
+                playBtn.innerHTML = '<i class="fas fa-play"></i>';
+            }
+        };
+
+        // Volume control
+        volumeSlider.oninput = (e) => {
+            audio.volume = e.target.value;
+        };
+
+        // UI Helpers
+        audio.onplay = () => playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+        audio.onpause = () => playBtn.innerHTML = '<i class="fas fa-play"></i>';
+        audio.onerror = () => { title.innerText = "Bağlantı Hatası"; };
+
+        // ==========================================
+        //  CANLI ANONSU (MİKROFON) DİNLEME SİSTEMİ
+        // ==========================================
+        let ws;
+        let mediaSource;
+        let sourceBuffer;
+        let queue = [];
+        let isSourceBufferUpdating = false;
+
+        function initLiveAudioClient() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${wsProtocol}//${window.location.host + window.location.pathname}`);
+
+            ws.binaryType = 'arraybuffer'; // Ses verisi için buffer kullan
+
+            ws.onopen = () => {
+                console.log("WebSocket'a bağlanıldı (Dinleyici)");
+                ws.send(JSON.stringify({ type: 'listener' }));
+            };
+
+            ws.onmessage = async (event) => {
+                // Sadece oynatıcı çalışıyorsa anonsu çal
+                if (audio.paused) return;
+
+                if (typeof event.data !== 'string') {
+                    // Blob verisini blob URL'ye çevirip geçici bir audio elementiyle çal
+                    const blob = new Blob([event.data], { type: 'audio/webm;codecs=opus' });
+                    const blobUrl = URL.createObjectURL(blob);
+                    
+                    const anonsAudio = new Audio(blobUrl);
+                    anonsAudio.volume = volumeSlider.value; // Kullanıcının ses seviyesine uygun
+                    anonsAudio.play().catch(e => console.error("Anons çalınamadı", e));
+                    
+                    // İş bitince hafızayı temizle
+                    anonsAudio.onended = () => {
+                        URL.revokeObjectURL(blobUrl);
+                    };
+                }
+            };
+
+            ws.onclose = () => {
+                setTimeout(initLiveAudioClient, 3000);
+            };
+        }
+        
+        initLiveAudioClient();
+
+    </script>
+</body>
+</html>
