@@ -45,6 +45,7 @@ let micAnalyzer = null;
 let micProcessor = null;
 
 let listenerCtx = null;
+let listenerGain = null;
 let isMicActive = false;
 
 // FX Nodes
@@ -343,6 +344,9 @@ if (shuffleBtn) {
 
 monitorMuteBtn.addEventListener('click', () => {
     audio.muted = !audio.muted;
+    if (listenerGain) {
+        listenerGain.gain.setTargetAtTime(audio.muted ? 0 : 1, listenerCtx.currentTime, 0.1);
+    }
     monitorMuteBtn.classList.toggle('active', audio.muted);
     monitorMuteBtn.innerHTML = audio.muted ? '<i class="fas fa-volume-mute"></i>' : '<i class="fas fa-volume-up"></i>';
 });
@@ -413,14 +417,19 @@ function initSocket() {
 
 function playIncomingAudio(data) {
     try {
-        if (!listenerCtx) listenerCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+        if (!listenerCtx) {
+            listenerCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+            listenerGain = listenerCtx.createGain();
+            listenerGain.gain.value = audio.muted ? 0 : 1;
+            listenerGain.connect(listenerCtx.destination);
+        }
         if (listenerCtx.state === 'suspended') listenerCtx.resume();
         const floatData = new Float32Array(data);
         const buffer = listenerCtx.createBuffer(1, floatData.length, 44100);
         buffer.getChannelData(0).set(floatData);
         const source = listenerCtx.createBufferSource();
         source.buffer = buffer;
-        source.connect(listenerCtx.destination);
+        source.connect(listenerGain);
         source.start();
     } catch(e) {}
 }
