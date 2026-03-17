@@ -1,0 +1,22 @@
+{
+  "name": "gaddar-broadcaster-studio",
+  "version": "1.0.0",
+  "description": "Professional Desktop Radio Broadcaster for Gaddar Radyo",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "author": "Antigravity",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.gaddar.broadcaster",
+    "win": {
+      "target": "portable"
+    }
+  }
+}

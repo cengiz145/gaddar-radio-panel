@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gaddar Radyo | Pro Studio v3.5</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <!-- LAYER: MAIN DASHBOARD -->
+    <div id="main-dashboard" class="view-layer">
+
+        
+        <aside class="side-nav">
+            <div class="nav-logo">
+                <i class="fas fa-rocket"></i>
+            </div>
+            <nav class="nav-group">
+                <button class="nav-btn active" data-tab="playlist" title="Playlist">
+                    <i class="fas fa-compact-disc"></i>
+                </button>
+                <button class="nav-btn" data-tab="upload" title="Dosya Yükle">
+                    <i class="fas fa-cloud-arrow-up"></i>
+                </button>
+                <button class="nav-btn" data-tab="embed" title="Site Kodu">
+                    <i class="fas fa-code-branch"></i>
+                </button>
+            </nav>
+            <button id="logout-btn" class="nav-btn logout-trigger" title="Çıkış">
+                <i class="fas fa-power-off"></i>
+            </button>
+        </aside>
+
+        <main class="main-stage">
+            <header class="stage-header">
+                <div class="status-indicator">
+                    <div id="live-indicator" class="live-tag offline">
+                        <div class="pulse-dot"></div>
+                        <span id="live-text">YAYIN BEKLENİYOR</span>
+                    </div>
+                </div>
+                <div class="user-meta" style="display:flex; align-items:center; gap:15px;">
+                    <div style="text-align:right;">
+                        <span style="display:block; font-size:0.8rem; color:var(--text-low);">SERVER STATUS</span>
+                        <span style="font-size:0.9rem; color:var(--success); font-weight:700;">CONNECTED</span>
+                    </div>
+                    <div style="width:1px; height:20px; background:var(--glass-border);"></div>
+                    <span style="color:var(--text-mid); font-weight:600;">STUDIO PRO</span>
+                </div>
+            </header>
+
+            <section class="broadcast-hero">
+                <div class="art-container">
+                    <img src="logo.png" alt="Broadcast Art" onerror="this.src='https://ui-avatars.com/api/?name=Gaddar&background=6366f1&color=fff&size=256'">
+                </div>
+                <div class="track-info">
+                    <span class="status-badge offline" id="live-indicator">YAYIN BEKLENİYOR</span>
+                    <h2 id="current-title">Yayın Bekleniyor...</h2>
+                    <div class="playback-controls">
+                        <!-- Music Player Controls -->
+                        <button id="music-play-btn" class="play-main" title="Müziği Başlat/Duraklat">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <button id="music-stop-btn" class="play-main secondary" title="Müziği Tamamen Durdur">
+                            <i class="fas fa-stop"></i>
+                        </button>
+                        <button id="loop-btn" class="play-monitor" title="Döngü Modu">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                        <button id="monitor-mute-btn" class="play-monitor" title="Sadece Sen Dinle (Mute)">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="waveform-svg" style="position:absolute; bottom:0; left:0; width:100%; height:120px; opacity:0.1; pointer-events:none;">
+                    <svg viewBox="0 0 1000 100" preserveAspectRatio="none" style="width:100%; height:100%;">
+                        <path id="waveform-path" d="M0,50 L1000,50" stroke="var(--primary)" fill="transparent" stroke-width="2"></path>
+                    </svg>
+                </div>
+            </section>
+
+            <div id="playlist-tab" class="playlist-container pane">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                    <h3 style="font-size:1.25rem;">Yayın Akışı</h3>
+                    <button id="shuffle-btn" class="op-btn" style="color:var(--primary); font-weight:600;">
+                        <i class="fas fa-shuffle"></i> Karıştır
+                    </button>
+                </div>
+                <div id="playlist-items">
+                    <!-- Song rows injected here -->
+                </div>
+            </div>
+
+            <div id="upload-tab" class="playlist-container pane hidden">
+                <h3 style="margin-bottom:1.5rem;">Dosya Yükleme</h3>
+                <div id="upload-zone" style="height:250px; border:2px dashed var(--glass-border); border-radius:1.5rem; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1rem; cursor:pointer; transition:0.3s;" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--glass-border)'">
+                    <i class="fas fa-file-audio" style="font-size:3rem; color:var(--text-low);"></i>
+                    <p style="color:var(--text-mid);">Dosyaları buraya bırakın veya tıklayın</p>
+                    <input type="file" id="audio-input" multiple accept="audio/*" class="hidden">
+                    <small style="color:var(--text-low)">Maksimum 100MB</small>
+                </div>
+            </div>
+
+            <div id="embed-tab" class="playlist-container pane hidden">
+                <h3 style="margin-bottom:1.5rem;">Site Entegrasyon Kodu</h3>
+                <div style="background:rgba(0,0,0,0.3); padding:1.5rem; border-radius:1.5rem; border:1px solid var(--glass-border);">
+                    <textarea id="embed-text" readonly style="width:100%; height:100px; background:transparent; border:none; color:var(--accent); font-family:monospace; resize:none;"><iframe src="https://gaddarbilgi.com.tr/radyo/" width="100%" height="600" frameborder="0"></iframe></textarea>
+                </div>
+            </div>
+        </main>
+
+        <aside class="studio-panel">
+            <div class="panel-section">
+                <h3>LIVE MIXER (KATMANLAR)</h3>
+                <div class="mixer-container">
+                    <!-- Layer 1: MUSIC -->
+                    <div class="mixer-channel">
+                        <div class="vu-meter">
+                            <div id="vu-music" class="vu-bar"></div>
+                        </div>
+                        <div class="fader-track">
+                            <input type="range" id="vol-music" min="0" max="1" step="0.01" value="0.7" orient="vertical" class="vertical-fader">
+                        </div>
+                        <span class="channel-label">MUSIC</span>
+                    </div>
+
+                    <!-- Layer 2: MIC -->
+                    <div class="mixer-channel">
+                        <div class="vu-meter">
+                            <div id="vu-mic" class="vu-bar active"></div>
+                        </div>
+                        <div class="fader-track">
+                            <input type="range" id="vol-mic" min="0" max="1" step="0.01" value="0.8" orient="vertical" class="vertical-fader">
+                        </div>
+                        <span class="channel-label">MIC</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h3>YAYIN YÖNETİMİ</h3>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                    <button id="stream-start-btn" class="op-btn" style="background:var(--primary); color:white; padding:10px; border-radius:10px; border:none; cursor:pointer; font-weight:bold;">
+                        <i class="fas fa-tower-broadcast"></i> BAŞLAT
+                    </button>
+                    <button id="stream-stop-btn" class="op-btn" style="background:var(--danger); color:white; padding:10px; border-radius:10px; border:none; cursor:pointer; font-weight:bold;">
+                        <i class="fas fa-power-off"></i> DURDUR
+                    </button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h3>STUDIO CONTROL</h3>
+                <div class="studio-master-btns" style="display:flex; flex-direction:column; gap:15px;">
+                    <div class="mic-settings" style="background:var(--bg-card); padding:15px; border-radius:1rem; border:1px solid var(--glass-border);">
+                        <label style="display:block; font-size:0.7rem; color:var(--text-low); margin-bottom:8px; font-weight:800; letter-spacing:1px;">MİKROFON SEÇİMİ</label>
+                        <select id="mic-selector" class="modern-input" style="width:100%; cursor:pointer; font-size:0.85rem; padding:10px;">
+                            <option value="">Varsayılan Mikrofon</option>
+                        </select>
+                    </div>
+                    <button id="mic-trigger" class="mic-btn-main">
+                        <i class="fas fa-microphone"></i>
+                        <span>ON AIR</span>
+                    </button>
+                </div>
+            </div>
+
+            
+            <div class="panel-section">
+                <h3>JINGLE STATION</h3>
+                <div class="fx-grid">
+                    <div class="fx-item jingle-card" id="jingle-reklam">
+                        <div class="fx-info">
+                            <span>REKLAM</span>
+                            <small id="name-reklam">Atanmadı</small>
+                        </div>
+                        <div style="display:flex; gap:10px;">
+                            <button class="op-btn" onclick="playJingle('reklam')" title="Çal"><i class="fas fa-play"></i></button>
+                            <button class="op-btn" onclick="clearJingle('reklam')" style="color:var(--danger)"><i class="fas fa-times"></i></button>
+                        </div>
+                    </div>
+                    <div class="fx-item jingle-card" id="jingle-slogan">
+                        <div class="fx-info">
+                            <span>SLOGAN</span>
+                            <small id="name-slogan">Atanmadı</small>
+                        </div>
+                        <div style="display:flex; gap:10px;">
+                            <button class="op-btn" onclick="playJingle('slogan')" title="Çal"><i class="fas fa-play"></i></button>
+                            <button class="op-btn" onclick="clearJingle('slogan')" style="color:var(--danger)"><i class="fas fa-times"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h3>FX PROCESSING</h3>
+                <div class="fx-grid">
+                    <div class="fx-item">
+                        <div class="fx-info">
+                            <span>Monitor</span>
+                            <small>Kulaklık Dinleme</small>
+                        </div>
+                        <label class="switch"><input type="checkbox" id="mon-toggle"><span class="slider"></span></label>
+                    </div>
+                    <div class="fx-item">
+                        <div class="fx-info">
+                            <span>Echo</span>
+                            <small>300ms Delay</small>
+                        </div>
+                        <label class="switch"><input type="checkbox" id="echo-toggle"><span class="slider"></span></label>
+                    </div>
+                    <div class="fx-item">
+                        <div class="fx-info">
+                            <span>Reverb</span>
+                            <small>Space Effect</small>
+                        </div>
+                        <label class="switch"><input type="checkbox" id="reverb-toggle"><span class="slider"></span></label>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel-section" style="margin-top:auto;">
+                <div class="system-tag">
+                    <p>SYSTEM v3.5 PRO | SECURE STREAM ACTIVE</p>
+                </div>
+            </div>
+        </aside>
+
+    </div>
+
+    <audio id="radyo-audio"></audio>
+    <script src="broadcaster.js"></script>
+</body>
+</html>
