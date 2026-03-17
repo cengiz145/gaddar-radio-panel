@@ -218,7 +218,11 @@ const dataMusic = new Uint8Array(128);
 const dataMic = new Uint8Array(128);
 
 function updateVUMeters() {
-    if (musicAnalyzer) {
+    if (listenerAnalyzer) {
+        listenerAnalyzer.getByteFrequencyData(dataMusic);
+        const avg = dataMusic.reduce((a, b) => a + b) / dataMusic.length;
+        if (vuMusicBar) vuMusicBar.style.height = Math.min(100, avg * 1.5) + '%';
+    } else if (musicAnalyzer) {
         musicAnalyzer.getByteFrequencyData(dataMusic);
         const avg = dataMusic.reduce((a, b) => a + b) / dataMusic.length;
         if (vuMusicBar) vuMusicBar.style.height = Math.min(100, avg * 1.5) + '%';
@@ -252,70 +256,32 @@ async function selectIndex(i) {
 }
 
 async function playIndex(i) {
-    if (i < 0) {
-        if (playlist.length > 0) i = 0;
+    if (i < 0 || i >= playlist.length) {
+        if (isLoopEnabled && playlist.length > 0) i = 0;
         else return;
     }
-    initAudioEngine();
     
-    // Smooth transition: Fade out current
-    if (!audio.paused && audio.src) {
-        await fadeTo(0, 800);
-    }
-
-    if (i >= playlist.length) {
-        if (isLoopEnabled && playlist.length > 0) i = 0;
-        else { 
-            stopMusic(); 
-            return; 
-        }
-    }
+    const f = playlist[i];
+    await fetch(`${API_BASE}/play`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ fileName: f.name }),
+        credentials: 'include',
+        mode: 'cors'
+    });
     
     currentIndex = i;
-    const f = playlist[i];
-    audio.src = `${UPLOADS_URL}${encodeURIComponent(f.name)}`;
-    audio.load();
-    await audio.play();
-    
-    // Fade in
-    audio.volume = 0;
-    await fadeTo(volMusicFader.value, 800);
-    musicPlayBtn.innerHTML = '<i class="fas fa-pause"></i>';
-    
-    audio.onended = () => { playIndex(currentIndex + 1); };
-    
-    // Only send sync if broadcast is active
-    const isBroadcasting = !liveIndicator.classList.contains('offline');
-    if (isBroadcasting) {
-        await fetch(`${API_BASE}/sync`, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ songName: f.name, isPlaying: true }),
-            credentials: 'include',
-            mode: 'cors'
-        });
-    }
+    syncState();
     renderPlaylist();
 }
 
 async function stopMusic() {
-    await fadeTo(0, 600);
-    audio.pause();
-    audio.src = "";
-    audio.volume = volMusicFader.value;
-    musicPlayBtn.innerHTML = '<i class="fas fa-play"></i>';
-    currentTitle.innerText = currentIndex >= 0 ? "Müzik Durduruldu" : "Yayın Bekleniyor...";
-    
-    const isBroadcasting = !liveIndicator.classList.contains('offline');
-    if (isBroadcasting) {
-        await fetch(`${API_BASE}/sync`, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ songName: null, isPlaying: true }),
-            credentials: 'include',
-            mode: 'cors'
-        });
-    }
+    await fetch(`${API_BASE}/stop`, { 
+        method: 'POST', 
+        credentials: 'include',
+        mode: 'cors'
+    });
+    syncState();
 }
 
 async function stopStream() {
@@ -433,13 +399,19 @@ function initSocket() {
     socket.onclose = () => setTimeout(initSocket, 3000);
 }
 
+let listenerAnalyzer = null;
 function playIncomingAudio(data) {
     try {
         if (!listenerCtx) {
             listenerCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
             listenerGain = listenerCtx.createGain();
             listenerGain.gain.value = audio.muted ? 0 : 1;
-            listenerGain.connect(listenerCtx.destination);
+            
+            listenerAnalyzer = listenerCtx.createAnalyser();
+            listenerAnalyzer.fftSize = 256;
+            
+            listenerGain.connect(listenerAnalyzer);
+            listenerAnalyzer.connect(listenerCtx.destination);
         }
         if (listenerCtx.state === 'suspended') listenerCtx.resume();
         const floatData = new Float32Array(data);

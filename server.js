@@ -266,14 +266,92 @@ function broadcastToListeners(data, sender, isBinary) {
     }
 }
 
-// AUTO-DJ IMPLEMENTATION
-async function checkAndStartAutoDJ() {
-    if (hosts.size > 0) return;
-    if (autoDJCommand) return;
+// Unified Playback Control
+function startServerPlayback(fileName, source = 'server') {
+    if (autoDJCommand) stopServerPlayback();
 
-    console.log('Starting Auto-DJ mode...');
+    const filePath = path.join(__dirname, 'uploads', fileName);
+    if (!fs.existsSync(filePath)) {
+        console.error('Server Playback: File not found', fileName);
+        currentAutoDJFile = null;
+        if (source === 'server') setTimeout(checkAndStartAutoDJ, 2000);
+        return;
+    }
+
+    console.log(`Server Playback [${source}]: Playing ${fileName}`);
+    currentAutoDJFile = fileName;
+    currentStatus.songName = fileName;
+    currentStatus.isPlaying = true;
+    currentStatus.startTime = Date.now();
+    currentStatus.source = source;
+    saveStatus();
+
+    const command = ffmpeg(filePath)
+        .audioChannels(1)
+        .audioFrequency(44100)
+        .format('f32le')
+        .on('error', (err) => {
+            if (!err.message.includes('SIGKILL') && !err.message.includes('string size must be')) {
+                console.error('Server Playback Error:', err.message);
+                stopServerPlayback();
+                if (source === 'server' || hosts.size === 0) setTimeout(checkAndStartAutoDJ, 5000);
+            }
+        })
+        .on('end', () => {
+            console.log(`Server Playback Finished: ${fileName}`);
+            autoDJCommand = null;
+            // Always check for next song
+            setTimeout(checkAndStartAutoDJ, 100);
+        });
+
+    const ffStream = command.pipe();
+    autoDJCommand = { command: command, stream: ffStream };
+
+    ffStream.on('data', (chunk) => {
+        broadcastToListeners(chunk, null, true);
+    });
+
+    ffStream.on('error', (err) => {
+        console.error('Server Playback Stream error:', err);
+        stopServerPlayback();
+        setTimeout(checkAndStartAutoDJ, 5000);
+    });
+}
+
+function stopServerPlayback() {
+    if (autoDJCommand) {
+        console.log('Stopping Server Playback.');
+        if (autoDJCommand.command) autoDJCommand.command.kill('SIGKILL');
+        if (autoDJCommand.stream) autoDJCommand.stream.destroy();
+        autoDJCommand = null;
+    }
+}
+
+// API for remote control
+app.post('/api/play', requireAuth, (req, res) => {
+    const { fileName } = req.body;
+    if (!fileName) return res.status(400).json({ error: 'No file specified' });
+    startServerPlayback(fileName, 'host');
+    res.json({ success: true, status: currentStatus });
+});
+
+app.post('/api/stop', requireAuth, (req, res) => {
+    stopServerPlayback();
+    currentStatus.isPlaying = false;
+    currentStatus.songName = null;
+    currentStatus.source = 'none';
+    saveStatus();
+    res.json({ success: true });
+});
+
+// AUTO-DJ IMPLEMENTATION (Helper for loop/auto logic)
+async function checkAndStartAutoDJ() {
+    // If a host manually started something, we might want to respect it OR keep looping it?
+    // User wants "Continuous". 
+    if (autoDJCommand) return; // Something is already playing
+
+    console.log('Auto-DJ session check...');
     
-    // Get playlist
     const uploadsDir = path.join(__dirname, 'uploads/');
     let files = [];
     try {
@@ -285,92 +363,25 @@ async function checkAndStartAutoDJ() {
         files = storedOrder.filter(name => dirFiles.includes(name));
         dirFiles.forEach(f => { if (!files.includes(f)) files.push(f); });
     } catch (e) {
-        console.error('Auto-DJ failed to read playlist:', e);
         return;
     }
 
-    if (files.length === 0) {
-        console.log('Auto-DJ: No files to play.');
-        return;
-    }
+    if (files.length === 0) return;
 
-    // Pick a file (current or next)
     let fileToPlay = files[0];
     if (currentAutoDJFile) {
         const idx = files.indexOf(currentAutoDJFile);
         if (idx !== -1 && idx < files.length - 1) {
             fileToPlay = files[idx + 1];
+        } else if (isLoopEnabled) {
+            fileToPlay = files[0];
+        } else {
+            return; // No loop, end of playlist
         }
     }
     
-    playFileAsAutoDJ(fileToPlay);
-}
-
-function playFileAsAutoDJ(fileName) {
-    if (autoDJCommand) stopAutoDJ();
-
-    const filePath = path.join(__dirname, 'uploads', fileName);
-    if (!fs.existsSync(filePath)) {
-        console.error('Auto-DJ: File not found', fileName);
-        currentAutoDJFile = null;
-        setTimeout(checkAndStartAutoDJ, 2000);
-        return;
-    }
-
-    console.log(`Auto-DJ: Playing ${fileName}`);
-    currentAutoDJFile = fileName;
-    currentStatus.songName = fileName;
-    currentStatus.isPlaying = true;
-    currentStatus.startTime = Date.now();
-    currentStatus.source = 'server';
-    saveStatus();
-
-    // Use FFmpeg to decode the file to raw Float32 and stream it
-    const command = ffmpeg(filePath)
-        .audioChannels(1)
-        .audioFrequency(44100)
-        .format('f32le')
-        .on('error', (err) => {
-            if (!err.message.includes('SIGKILL') && !err.message.includes('string size must be')) {
-                console.error('Auto-DJ: FFmpeg error:', err.message);
-                stopAutoDJ();
-                setTimeout(checkAndStartAutoDJ, 5000);
-            }
-        })
-        .on('end', () => {
-            console.log(`Auto-DJ: Finished ${fileName}`);
-            autoDJCommand = null;
-            if (hosts.size === 0) {
-                setTimeout(checkAndStartAutoDJ, 100);
-            }
-        });
-
-    const ffStream = command.pipe();
-    autoDJCommand = { command: command, stream: ffStream };
-
-    ffStream.on('data', (chunk) => {
-        if (hosts.size > 0) {
-            stopAutoDJ();
-            return;
-        }
-        broadcastToListeners(chunk, null, true);
-    });
-
-    ffStream.on('error', (err) => {
-        console.error('Auto-DJ: Stream error:', err);
-        stopAutoDJ();
-        setTimeout(checkAndStartAutoDJ, 5000);
-    });
-}
-
-function stopAutoDJ() {
-    if (autoDJCommand) {
-        console.log('Stopping Auto-DJ.');
-        if (autoDJCommand.command) autoDJCommand.command.kill('SIGKILL');
-        if (autoDJCommand.stream) autoDJCommand.stream.destroy();
-        autoDJCommand = null;
-    }
+    startServerPlayback(fileToPlay, 'server');
 }
 
 // Initial check on boot
-setTimeout(checkAndStartAutoDJ, 10000);
+setTimeout(checkAndStartAutoDJ, 5000);
