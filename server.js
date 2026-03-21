@@ -5,6 +5,7 @@ const fs = require('fs');
 const cors = require('cors');
 const session = require('express-session');
 const ffmpeg = require('fluent-ffmpeg');
+const { execSync } = require('child_process');
 
 const app = express();
 const PORT = 4005;
@@ -52,7 +53,7 @@ const requireAuth = (req, res, next) => {
 };
 
 let currentStatus = { songName: null, startTime: null, isPlaying: false, source: 'none' };
-let isLoopEnabled = true; // Auto-DJ usually wants loop
+let isLoopEnabled = true;
 
 if (fs.existsSync(STATUS_FILE)) {
     try { 
@@ -68,6 +69,7 @@ const saveStatus = () => {
     try { fs.writeFileSync(STATUS_FILE, JSON.stringify(currentStatus)); } catch(e) {}
 };
 
+// ==================== AUTH ROUTES ====================
 app.post('/api/login', (req, res) => {
     const { password } = req.body;
     if (password === AUTH.pass) {
@@ -87,6 +89,7 @@ app.get('/api/logout', (req, res) => {
     res.json({ success: true });
 });
 
+// ==================== SYNC API ====================
 app.get('/api/sync', (req, res) => {
     const elapsed = currentStatus.isPlaying && currentStatus.startTime ? (Date.now() - currentStatus.startTime) / 1000 : 0;
     res.json({ 
@@ -102,17 +105,13 @@ app.post('/api/sync', requireAuth, (req, res) => {
     const { songName, isPlaying } = req.body;
     if (songName !== undefined) currentStatus.songName = songName;
     if (isPlaying !== undefined) currentStatus.isPlaying = isPlaying;
-    
     if (currentStatus.isPlaying) {
         currentStatus.startTime = Date.now();
         currentStatus.source = 'host';
-        stopAutoDJ(); // Stop auto-dj if host starts playing
     } else {
         currentStatus.startTime = null;
         currentStatus.source = 'none';
-        // Auto-DJ might start after a delay or on socket close
     }
-    
     saveStatus();
     res.json({ status: currentStatus });
 });
@@ -122,6 +121,7 @@ app.post('/api/loop', (req, res) => {
     res.json({ loop: isLoopEnabled });
 });
 
+// ==================== FILE MANAGEMENT ====================
 const upload = multer({ 
     storage: multer.diskStorage({
         destination: (req, file, cb) => {
@@ -187,6 +187,7 @@ app.delete('/api/files/:name', requireAuth, (req, res) => {
     } catch(e) { res.status(500).json({ error: 'Delete failed' }); }
 });
 
+// ==================== STATIC FILES ====================
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -195,62 +196,49 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-const server = app.listen(PORT, '0.0.0.0', () => console.log(`Stable Radio Production on ${PORT}`));
+// ==================== SERVER + WEBSOCKET ====================
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Gaddar Radio Server on port ${PORT}`);
+    // Auto-start playlist on boot
+    setTimeout(() => {
+        if (!currentPlayback) {
+            console.log('Auto-starting playlist on server boot...');
+            playNextInPlaylist();
+        }
+    }, 3000);
+});
 
 const WebSocket = require('ws');
 const wss = new WebSocket.Server({ server });
 let listeners = new Set();
 let hosts = new Set();
-let micTrafficCount = 0;
-
-// AUTO-DJ GLOBAL STATE
-let autoDJCommand = null;
-let currentAutoDJFile = null;
 
 wss.on('connection', (ws) => {
     ws.on('message', (data, isBinary) => {
         if (isBinary) {
-            // If it's binary data (mic), this is a host
+            // Host mic data - relay to listeners
             if (!hosts.has(ws)) {
                 hosts.add(ws);
-                console.log('Host detected via binary mic data. Stopping Auto-DJ.');
-                stopAutoDJ();
-                currentStatus.isPlaying = true;
-                currentStatus.source = 'host';
-                saveStatus();
+                console.log('Host mic active.');
             }
-            micTrafficCount++;
-            broadcastToListeners(data, ws, true);
+            broadcastToAll(data, ws, true);
         } else {
             try {
                 const msg = JSON.parse(data.toString());
                 if (msg.type === 'listener') {
                     listeners.add(ws);
-                    console.log('New listener registered via WS');
                 } else if (msg.type === 'mic_state') {
                     if (msg.active) {
                         hosts.add(ws);
-                        stopAutoDJ();
-                        currentStatus.source = 'host';
-                    } else {
-                        // host stop mic, but might still be playing music
                     }
+                    broadcastToAll(data, ws, false);
                 }
-                broadcastToListeners(data, ws, false);
-            } catch (e) { }
+            } catch (e) {}
         }
     });
-
     ws.on('close', () => {
         listeners.delete(ws);
-        if (hosts.has(ws)) {
-            hosts.delete(ws);
-            console.log('Host disconnected.');
-            if (hosts.size === 0) {
-                console.log('No hosts left. Scheduling Auto-DJ...');
-                setTimeout(checkAndStartAutoDJ, 5000);
-            }
-        }
+        hosts.delete(ws);
     });
     ws.on('error', () => {
         listeners.delete(ws);
@@ -258,130 +246,273 @@ wss.on('connection', (ws) => {
     });
 });
 
-function broadcastToListeners(data, sender, isBinary) {
-    for (const client of listeners) {
+function broadcastToAll(data, sender, isBinary) {
+    for (const client of wss.clients) {
         if (client !== sender && client.readyState === WebSocket.OPEN) {
             client.send(data, { binary: isBinary });
         }
     }
 }
 
-// Unified Playback Control
-function startServerPlayback(fileName, source = 'server') {
-    if (autoDJCommand) stopServerPlayback();
-
-    const filePath = path.join(__dirname, 'uploads', fileName);
-    if (!fs.existsSync(filePath)) {
-        console.error('Server Playback: File not found', fileName);
-        currentAutoDJFile = null;
-        if (source === 'server') setTimeout(checkAndStartAutoDJ, 2000);
-        return;
-    }
-
-    console.log(`Server Playback [${source}]: Playing ${fileName}`);
-    currentAutoDJFile = fileName;
-    currentStatus.songName = fileName;
-    currentStatus.isPlaying = true;
-    currentStatus.startTime = Date.now();
-    currentStatus.source = source;
-    saveStatus();
-
-    const command = ffmpeg(filePath)
-        .audioChannels(1)
-        .audioFrequency(44100)
-        .format('f32le')
-        .on('error', (err) => {
-            if (!err.message.includes('SIGKILL') && !err.message.includes('string size must be')) {
-                console.error('Server Playback Error:', err.message);
-                stopServerPlayback();
-                if (source === 'server' || hosts.size === 0) setTimeout(checkAndStartAutoDJ, 5000);
-            }
-        })
-        .on('end', () => {
-            console.log(`Server Playback Finished: ${fileName}`);
-            autoDJCommand = null;
-            // Always check for next song
-            setTimeout(checkAndStartAutoDJ, 100);
-        });
-
-    const ffStream = command.pipe();
-    autoDJCommand = { command: command, stream: ffStream };
-
-    ffStream.on('data', (chunk) => {
-        broadcastToListeners(chunk, null, true);
-    });
-
-    ffStream.on('error', (err) => {
-        console.error('Server Playback Stream error:', err);
-        stopServerPlayback();
-        setTimeout(checkAndStartAutoDJ, 5000);
-    });
-}
-
-function stopServerPlayback() {
-    if (autoDJCommand) {
-        console.log('Stopping Server Playback.');
-        if (autoDJCommand.command) autoDJCommand.command.kill('SIGKILL');
-        if (autoDJCommand.stream) autoDJCommand.stream.destroy();
-        autoDJCommand = null;
+function broadcastToListeners(data) {
+    for (const client of wss.clients) {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(data, { binary: true });
+        }
     }
 }
 
-// API for remote control
-app.post('/api/play', requireAuth, (req, res) => {
-    const { fileName } = req.body;
-    if (!fileName) return res.status(400).json({ error: 'No file specified' });
-    startServerPlayback(fileName, 'host');
-    res.json({ success: true, status: currentStatus });
-});
+function broadcastStatus() {
+    const elapsed = currentStatus.isPlaying && currentStatus.startTime ? (Date.now() - currentStatus.startTime) / 1000 : 0;
+    const msg = JSON.stringify({
+        type: 'status',
+        isPlaying: currentStatus.isPlaying,
+        songName: currentStatus.songName,
+        elapsed: elapsed,
+        source: currentStatus.source
+    });
+    for (const client of wss.clients) {
+        if (client.readyState === WebSocket.OPEN) client.send(msg);
+    }
+}
+setInterval(broadcastStatus, 5000);
 
-app.post('/api/stop', requireAuth, (req, res) => {
-    stopServerPlayback();
-    currentStatus.isPlaying = false;
-    currentStatus.songName = null;
-    currentStatus.source = 'none';
-    saveStatus();
-    res.json({ success: true });
-});
+// ==================== SERVER-SIDE AUDIO ENGINE ====================
+let currentPlayback = null;   // { command, stream, fileName }
+let nextPlayback = null;       // For crossfade overlap
+let currentSongDuration = 0;
+let fadeTimer = null;
+let isFadingOut = false;
 
-// AUTO-DJ IMPLEMENTATION (Helper for loop/auto logic)
-async function checkAndStartAutoDJ() {
-    // If a host manually started something, we might want to respect it OR keep looping it?
-    // User wants "Continuous". 
-    if (autoDJCommand) return; // Something is already playing
+// Get song duration in seconds using ffprobe
+function getSongDuration(filePath) {
+    try {
+        const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${filePath}"`, { timeout: 5000 });
+        return parseFloat(out.toString().trim()) || 0;
+    } catch(e) { return 0; }
+}
 
-    console.log('Auto-DJ session check...');
-    
+// Get ordered playlist files
+function getPlaylistFiles() {
     const uploadsDir = path.join(__dirname, 'uploads/');
-    let files = [];
     try {
         const dirFiles = fs.readdirSync(uploadsDir);
         let storedOrder = [];
         if (fs.existsSync(PLAYLIST_FILE)) {
             storedOrder = JSON.parse(fs.readFileSync(PLAYLIST_FILE, 'utf8'));
         }
-        files = storedOrder.filter(name => dirFiles.includes(name));
+        let files = storedOrder.filter(name => dirFiles.includes(name));
         dirFiles.forEach(f => { if (!files.includes(f)) files.push(f); });
-    } catch (e) {
+        return files;
+    } catch(e) { return []; }
+}
+
+// Core: Start playing a file on the server
+function startPlayback(fileName, fadeInDuration = 2) {
+    const filePath = path.join(__dirname, 'uploads', fileName);
+    if (!fs.existsSync(filePath)) {
+        console.error('File not found:', fileName);
+        return null;
+    }
+
+    console.log(`▶ Playing: ${fileName}`);
+
+    // Get duration for crossfade scheduling
+    const duration = getSongDuration(filePath);
+    console.log(`  Duration: ${duration.toFixed(1)}s`);
+
+    // Build ffmpeg with fade-in filter
+    const filters = [];
+    if (fadeInDuration > 0) {
+        filters.push(`afade=t=in:d=${fadeInDuration}`);
+    }
+
+    let cmd;
+    if (filters.length > 0) {
+        cmd = ffmpeg(filePath)
+            .audioChannels(1)
+            .audioFrequency(44100)
+            .audioFilter(filters.join(','))
+            .format('f32le');
+    } else {
+        cmd = ffmpeg(filePath)
+            .audioChannels(1)
+            .audioFrequency(44100)
+            .format('f32le');
+    }
+
+    cmd.on('error', (err) => {
+        if (!err.message.includes('SIGKILL')) {
+            console.error('Playback error:', err.message);
+        }
+    });
+
+    cmd.on('end', () => {
+        console.log(`■ Finished: ${fileName}`);
+        // If this was the current playback and no next is queued, advance playlist
+        if (currentPlayback && currentPlayback.fileName === fileName && !nextPlayback) {
+            currentPlayback = null;
+            playNextInPlaylist();
+        } else if (currentPlayback && currentPlayback.fileName === fileName && nextPlayback) {
+            // Crossfade completed, next is now current
+            currentPlayback = nextPlayback;
+            nextPlayback = null;
+        }
+    });
+
+    const stream = cmd.pipe();
+    const playbackObj = { command: cmd, stream: stream, fileName: fileName, startedAt: Date.now() };
+
+    // Fade-out volume tracking
+    let fadeOutStarted = false;
+    const CROSSFADE_DURATION = 3; // seconds
+
+    stream.on('data', (chunk) => {
+        const floatData = new Float32Array(chunk.buffer, chunk.byteOffset, chunk.length / 4);
+        
+        // Apply fade-out envelope if we're near the end
+        if (duration > 0 && !fadeOutStarted) {
+            const elapsed = (Date.now() - playbackObj.startedAt) / 1000;
+            const fadeOutStart = duration - CROSSFADE_DURATION - 1; // Start fade 1s before crossfade point
+            
+            if (elapsed >= fadeOutStart && elapsed < duration) {
+                // Start next song for crossfade (only once)
+                if (!nextPlayback && !isFadingOut) {
+                    isFadingOut = true;
+                    fadeOutStarted = true;
+                    console.log(`↻ Crossfade starting for: ${fileName}`);
+                    
+                    // Start next song immediately with fade-in
+                    const files = getPlaylistFiles();
+                    const idx = files.indexOf(fileName);
+                    let nextIdx;
+                    if (isLoopEnabled) {
+                        nextIdx = (idx + 1) % files.length;
+                    } else if (idx + 1 < files.length) {
+                        nextIdx = idx + 1;
+                    } else {
+                        return; // End of playlist, no loop
+                    }
+                    
+                    const nextFile = files[nextIdx];
+                    nextPlayback = startPlayback(nextFile, CROSSFADE_DURATION);
+                    if (nextPlayback) {
+                        currentStatus.songName = nextFile;
+                        currentStatus.startTime = Date.now();
+                        saveStatus();
+                        broadcastStatus();
+                    }
+                }
+            }
+
+            // Apply fade-out volume envelope
+            if (fadeOutStarted || isFadingOut) {
+                const elapsed = (Date.now() - playbackObj.startedAt) / 1000;
+                const fadeProgress = Math.min(1, (elapsed - (duration - CROSSFADE_DURATION)) / CROSSFADE_DURATION);
+                const volume = Math.max(0, 1 - fadeProgress);
+                for (let i = 0; i < floatData.length; i++) {
+                    floatData[i] *= volume;
+                }
+            }
+        }
+
+        // Broadcast to all connected clients
+        broadcastToListeners(Buffer.from(floatData.buffer));
+    });
+
+    stream.on('error', (err) => {
+        console.error('Stream error:', err.message);
+    });
+
+    return playbackObj;
+}
+
+function stopPlayback() {
+    if (currentPlayback) {
+        try { currentPlayback.command.kill('SIGKILL'); } catch(e) {}
+        try { currentPlayback.stream.destroy(); } catch(e) {}
+        currentPlayback = null;
+    }
+    if (nextPlayback) {
+        try { nextPlayback.command.kill('SIGKILL'); } catch(e) {}
+        try { nextPlayback.stream.destroy(); } catch(e) {}
+        nextPlayback = null;
+    }
+    isFadingOut = false;
+    if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
+}
+
+function playNextInPlaylist() {
+    isFadingOut = false;
+    const files = getPlaylistFiles();
+    if (files.length === 0) {
+        currentStatus.isPlaying = false;
+        currentStatus.songName = null;
+        currentStatus.source = 'none';
+        saveStatus();
+        broadcastStatus();
         return;
     }
 
-    if (files.length === 0) return;
-
-    let fileToPlay = files[0];
-    if (currentAutoDJFile) {
-        const idx = files.indexOf(currentAutoDJFile);
-        if (idx !== -1 && idx < files.length - 1) {
-            fileToPlay = files[idx + 1];
-        } else if (isLoopEnabled) {
-            fileToPlay = files[0];
+    let nextFile = files[0];
+    if (currentStatus.songName) {
+        const idx = files.indexOf(currentStatus.songName);
+        if (isLoopEnabled) {
+            nextFile = files[(idx + 1) % files.length];
+        } else if (idx + 1 < files.length) {
+            nextFile = files[idx + 1];
         } else {
-            return; // No loop, end of playlist
+            // End of playlist
+            currentStatus.isPlaying = false;
+            currentStatus.songName = null;
+            currentStatus.source = 'none';
+            saveStatus();
+            broadcastStatus();
+            return;
         }
     }
-    
-    startServerPlayback(fileToPlay, 'server');
+
+    currentStatus.songName = nextFile;
+    currentStatus.isPlaying = true;
+    currentStatus.startTime = Date.now();
+    currentStatus.source = 'server';
+    saveStatus();
+    broadcastStatus();
+
+    currentPlayback = startPlayback(nextFile, 2);
 }
 
-// Initial check on boot
-setTimeout(checkAndStartAutoDJ, 5000);
+// ==================== CONTROL API ====================
+app.post('/api/play', requireAuth, (req, res) => {
+    const { fileName } = req.body;
+    if (!fileName) return res.status(400).json({ error: 'No file specified' });
+
+    // Stop whatever is playing and start this file
+    stopPlayback();
+    
+    currentStatus.songName = fileName;
+    currentStatus.isPlaying = true;
+    currentStatus.startTime = Date.now();
+    currentStatus.source = 'server';
+    saveStatus();
+    broadcastStatus();
+
+    currentPlayback = startPlayback(fileName, 0); // No fade-in for manual play
+    res.json({ success: true, status: currentStatus });
+});
+
+app.post('/api/stop', requireAuth, (req, res) => {
+    stopPlayback();
+    currentStatus.isPlaying = false;
+    currentStatus.songName = null;
+    currentStatus.source = 'none';
+    saveStatus();
+    broadcastStatus();
+    res.json({ success: true });
+});
+
+app.post('/api/next', requireAuth, (req, res) => {
+    stopPlayback();
+    playNextInPlaylist();
+    res.json({ success: true, status: currentStatus });
+});

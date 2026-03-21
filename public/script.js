@@ -1,3 +1,4 @@
+ 
 const loginLayer = document.getElementById('login-layer');
 const loginForm = document.getElementById('login-form');
 const mainUI = document.getElementById('main-dashboard');
@@ -28,24 +29,20 @@ const reverbBadge = document.getElementById('fx-badge-reverb');
 
 let playlist = [];
 let currentIndex = -1;
-let audio = document.getElementById('radyo-audio');
-audio.crossOrigin = "anonymous";
 let socket = null;
 
 // Audio Engine Components
 let audioContext = null;
-let musicSource = null;
-let musicGain = null;
-let musicAnalyzer = null;
-
 let micStream = null;
 let micSource = null;
 let micGain = null;
 let micAnalyzer = null;
-let micProcessor = null;
 
 let listenerCtx = null;
 let listenerGain = null;
+let listenerAnalyzer = null;
+let nextStartTime = 0;
+const BUFFER_OFFSET = 0.3;
 let isMicActive = false;
 
 // FX Nodes
@@ -55,19 +52,6 @@ let feedbackGain = null;
 let reverbNode = null;
 let isBroadcasterSpeaking = false;
 
-
-async function fadeTo(target, duration = 600) {
-    return new Promise(resolve => {
-        const startVol = audio.volume;
-        const start = Date.now();
-        const it = setInterval(() => {
-            const el = Date.now() - start;
-            const pr = Math.min(1, el / duration);
-            audio.volume = startVol + (target - startVol) * pr;
-            if (pr >= 1) { clearInterval(it); resolve(); }
-        }, 16);
-    });
-}
 
 // Helpers
 const API_BASE = 'api';
@@ -120,32 +104,13 @@ async function syncState() {
             streamStopBtn.style.opacity = '0.5';
         }
 
-        // Handle audio playback sync if a song is specified
         if (data.songName && data.isPlaying) {
             const cleanName = data.songName.split('-').slice(1).join('-').replace(/\.[^/.]+$/, "") || data.songName;
-            currentTitle.innerText = cleanName + (data.source === 'server' ? ' [OTOMATİK]' : '');
+            currentTitle.innerText = cleanName;
             currentIndex = playlist.findIndex(f => f.name === data.songName);
-            
-            // If server is playing, we listen via WebSocket, not direct <iframe> or <audio> src
-            // But for the panel to show progress, we might keep it.
-            // HOWEVER, if source is 'server', its the same as 'host' speaks - we listen via WS
-            if (data.source === 'server') {
-                audio.pause();
-                audio.src = "";
-            } else {
-                const streamUrl = `uploads/${encodeURIComponent(data.songName)}`;
-                const fullUrl = window.location.origin + '/radyo/' + streamUrl;
-                const altUrl = window.location.origin + '/' + streamUrl;
-                
-                if (audio.src !== fullUrl && audio.src !== altUrl) {
-                    audio.src = streamUrl;
-                    audio.load();
-                }
-                if (audio.paused) audio.play().catch(e => {});
-            }
             musicPlayBtn.innerHTML = '<i class="fas fa-pause"></i>';
-        } else if (!data.songName) {
-            if (!data.isPlaying) currentTitle.innerText = "Yayın Bekleniyor...";
+        } else if (!data.isPlaying) {
+            currentTitle.innerText = "Yayın Bekleniyor...";
             musicPlayBtn.innerHTML = '<i class="fas fa-play"></i>';
         }
     } catch(e) {}
@@ -166,30 +131,11 @@ if (loginForm) {
     });
 }
 
-function initAudioEngine() {
-    if (audioContext) return;
-    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
-    
-    // Setup Music Layer
-    musicSource = audioContext.createMediaElementSource(audio);
-    musicGain = audioContext.createGain();
-    musicAnalyzer = audioContext.createAnalyser();
-    musicAnalyzer.fftSize = 256;
-    
-    musicGain.gain.value = volMusicFader.value;
-    
-    musicSource.connect(musicGain);
-    musicGain.connect(musicAnalyzer);
-    musicAnalyzer.connect(audioContext.destination);
-
-    // Initial Meter Loop
-    updateVUMeters();
-}
-
-const dataMusic = new Uint8Array(128);
-const dataMic = new Uint8Array(128);
+let vuLoopActive = false;
 
 function updateVUMeters() {
+    if (!vuLoopActive) return;
+
     if (listenerAnalyzer) {
         listenerAnalyzer.getByteFrequencyData(dataMusic);
         const avg = dataMusic.reduce((a, b) => a + b) / dataMusic.length;
@@ -208,7 +154,31 @@ function updateVUMeters() {
         vuMicBar.style.height = '0%';
     }
     
-    requestAnimationFrame(updateVUMeters);
+    if (vuLoopActive) {
+        requestAnimationFrame(updateVUMeters);
+    }
+}
+
+function initAudioEngine() {
+    if (audioContext) return;
+    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+
+    // Listener context for hearing the server stream
+    listenerCtx = audioContext;
+    listenerGain = audioContext.createGain();
+    listenerGain.gain.value = volMusicFader.value;
+    
+    listenerAnalyzer = audioContext.createAnalyser();
+    listenerAnalyzer.fftSize = 256;
+    
+    listenerGain.connect(listenerAnalyzer);
+    listenerAnalyzer.connect(audioContext.destination);
+    nextStartTime = audioContext.currentTime + BUFFER_OFFSET;
+
+    if (!vuLoopActive) {
+        vuLoopActive = true;
+        updateVUMeters();
+    }
 }
 
 const logoutBtn = document.getElementById('logout-btn');
@@ -266,12 +236,11 @@ async function stopStream() {
 }
 
 musicPlayBtn.addEventListener('click', async () => {
-    if (audio.paused || !audio.src) {
+    initAudioEngine();
+    if (currentIndex >= 0) {
         playIndex(currentIndex);
-    } else {
-        await fadeTo(0, 600);
-        audio.pause();
-        musicPlayBtn.innerHTML = '<i class="fas fa-play"></i>';
+    } else if (playlist.length > 0) {
+        playIndex(0);
     }
 });
 
@@ -279,12 +248,8 @@ musicStopBtn.addEventListener('click', stopMusic);
 
 streamStartBtn.addEventListener('click', async () => {
     initAudioEngine();
-    await fetch(`${API_BASE}/sync`, { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ isPlaying: true, songName: audio.src ? playlist[currentIndex].name : null }),
-        credentials: 'include'
-    });
+    if (playlist.length > 0 && currentIndex < 0) currentIndex = 0;
+    if (currentIndex >= 0) playIndex(currentIndex);
     syncState();
 });
 
@@ -309,12 +274,11 @@ if (shuffleBtn) {
 }
 
 monitorMuteBtn.addEventListener('click', () => {
-    audio.muted = !audio.muted;
-    if (listenerGain) {
-        listenerGain.gain.setTargetAtTime(audio.muted ? 0 : 1, listenerCtx.currentTime, 0.1);
-    }
-    monitorMuteBtn.classList.toggle('active', audio.muted);
-    monitorMuteBtn.innerHTML = audio.muted ? '<i class="fas fa-volume-mute"></i>' : '<i class="fas fa-volume-up"></i>';
+    if (!listenerGain) return;
+    const isMuted = listenerGain.gain.value === 0;
+    listenerGain.gain.setTargetAtTime(isMuted ? 1.0 : 0, audioContext.currentTime, 0.1);
+    monitorMuteBtn.classList.toggle('active', !isMuted);
+    monitorMuteBtn.innerHTML = !isMuted ? '<i class="fas fa-volume-mute"></i>' : '<i class="fas fa-volume-up"></i>';
 });
 
 
@@ -341,21 +305,18 @@ function clearJingle(type) {
 }
 
 async function playJingle(type) {
-    const src = localStorage.getItem(`jingle_${type}_src`);
+    const src = localStorage.getItem(`jingle_${type}_name`);
     if (!src) return alert("Hata: " + type.toUpperCase() + " atanmamış!");
     
-    initAudioEngine();
-    const originalVol = volMusicFader.value;
+    // Broadcast the jingle actively to all listeners through the server stream
+    await fetch(`${API_BASE}/play`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ fileName: src }),
+        credentials: 'include'
+    });
     
-    await fadeTo(0, 400);
-    const oldOnEnded = audio.onended;
-    audio.src = src;
-    audio.play();
-    audio.onended = () => {
-        audio.onended = oldOnEnded;
-        playIndex(currentIndex); // Resume current
-    };
-    await fadeTo(originalVol, 400);
+    syncState();
 }
 
 // WEBSOCKET
@@ -365,15 +326,15 @@ function initSocket() {
     socket.binaryType = 'arraybuffer';
     socket.onopen = () => socket.send(JSON.stringify({ type: 'listener' }));
     socket.onmessage = (e) => {
-        if (isMicActive) return;
         if (e.data instanceof ArrayBuffer) {
+            // Play server audio stream for monitoring
+            if (isMicActive) return; // Don't play back when mic is active
             playIncomingAudio(e.data);
         } else {
             try {
                 const msg = JSON.parse(e.data);
-                if (msg.type === 'mic_state') {
-                    isBroadcasterSpeaking = msg.active;
-                    applyDucking();
+                if (msg.type === 'status' && msg.songName) {
+                    syncState();
                 }
             } catch(err) {}
         }
@@ -381,40 +342,36 @@ function initSocket() {
     socket.onclose = () => setTimeout(initSocket, 3000);
 }
 
-let listenerAnalyzer = null;
 function playIncomingAudio(data) {
-    try {
-        if (!listenerCtx) {
-            listenerCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
-            listenerGain = listenerCtx.createGain();
-            listenerGain.gain.value = audio.muted ? 0 : 1;
-            
-            listenerAnalyzer = listenerCtx.createAnalyser();
-            listenerAnalyzer.fftSize = 256;
-            
-            listenerGain.connect(listenerAnalyzer);
-            listenerAnalyzer.connect(listenerCtx.destination);
-        }
+    if (!listenerCtx || listenerCtx.state !== 'running') {
+        initAudioEngine();
         if (listenerCtx.state === 'suspended') listenerCtx.resume();
+    }
+    try {
         const floatData = new Float32Array(data);
         const buffer = listenerCtx.createBuffer(1, floatData.length, 44100);
         buffer.getChannelData(0).set(floatData);
         const source = listenerCtx.createBufferSource();
         source.buffer = buffer;
         source.connect(listenerGain);
-        source.start();
+        const now = listenerCtx.currentTime;
+        if (nextStartTime < now || nextStartTime > now + 2.0) {
+            nextStartTime = now + 0.05;
+        }
+        source.start(nextStartTime);
+        nextStartTime += buffer.duration;
     } catch(e) {}
 }
 
+
+
 function applyDucking() {
-    if (!musicGain || !audioContext) return;
-    const shouldDuck = isMicActive || isBroadcasterSpeaking;
+    if (!listenerGain || !audioContext) return;
+    const shouldDuck = isMicActive;
     const currentFaderVal = parseFloat(volMusicFader.value);
     const targetVal = shouldDuck ? currentFaderVal * 0.15 : currentFaderVal;
-    
-    // Smooth transition using linearRamp
-    musicGain.gain.cancelScheduledValues(audioContext.currentTime);
-    musicGain.gain.linearRampToValueAtTime(targetVal, audioContext.currentTime + 0.4);
+    listenerGain.gain.cancelScheduledValues(audioContext.currentTime);
+    listenerGain.gain.linearRampToValueAtTime(targetVal, audioContext.currentTime + 0.4);
 }
 
 function createImpulseResponse(context, duration, decay) {
@@ -490,15 +447,15 @@ async function toggleMic() {
             // Mixer Connection
             outNode.connect(micGain);
             micGain.connect(micAnalyzer);
-            
+
             // Monitor
             monitorGain = audioContext.createGain();
             monitorGain.gain.value = monToggle.checked ? 1.0 : 0;
             micGain.connect(monitorGain);
             monitorGain.connect(audioContext.destination);
 
-            // Stream Processor
-            micProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+            // Stream mic to server via WebSocket
+            const micProcessor = audioContext.createScriptProcessor(4096, 1, 1);
             micGain.connect(micProcessor);
             const silencer = audioContext.createGain(); silencer.gain.value = 0;
             micProcessor.connect(silencer); silencer.connect(audioContext.destination);
@@ -545,7 +502,7 @@ window.addEventListener('keydown', (e) => {
 
 // FADER HANDLERS
 volMusicFader.addEventListener('input', (e) => {
-    if (musicGain) musicGain.gain.setTargetAtTime(e.target.value, audioContext.currentTime, 0.05);
+    if (listenerGain) listenerGain.gain.setTargetAtTime(e.target.value, audioContext.currentTime, 0.05);
     applyDucking();
 });
 
@@ -554,22 +511,7 @@ volMicFader.addEventListener('input', (e) => {
 });
 
 // UTILS
-function fadeTo(targetVol, duration) {
-    return new Promise(resolve => {
-        const startVol = audio.volume;
-        const startTime = performance.now();
-        
-        function update() {
-            const elapsed = performance.now() - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            audio.volume = startVol + (targetVol - startVol) * progress;
-            
-            if (progress < 1) requestAnimationFrame(update);
-            else resolve();
-        }
-        requestAnimationFrame(update);
-    });
-}
+// Removed redundant fadeTo
 
 const renderPlaylist = () => {
     loadJingles();
@@ -723,3 +665,4 @@ if (uploadZone) {
 
 checkAuth();
 setInterval(syncState, 5000);
+
